@@ -9,5 +9,17 @@
     <string name="go">\tGroup owner</string>
     <string name="gc">\tGroup client</string>
     <string name="peers">TCP peers:</string>
-    <string name="browse">browse</string>
+    <string name="browse">Select Files</string>
+    <string name="select_file">Select files to send</string>
+    <string name="turn_on_location">Please turn on location service.</string>
+    <string name="not_connected">Not connected to any peer</string>
+    <string name="no_target_device">No target device selected</string>
+    <string name="sending_file">Sending file…</string>
+    <string name="sending_files">Sending %d files…</string>
+    <string name="permission_required">Permissions are required for this app to work</string>
+    <string name="create_group_failed">Failed to create group</string>
+    <string name="connect_failed">Connect failed. Retry.</string>
+    <string name="cancel_connect_failed">Cancel connect failed: </string>
+    <string name="discover_failed">Discover peers failed: </string>
+    <string name="p2p_disabled">WiFi Direct is disabled</string>
 </resources>

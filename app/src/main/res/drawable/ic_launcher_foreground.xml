@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Left device: rounded rect phone shape -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M22,34 L36,34 Q40,34 40,38 L40,66 Q40,70 36,70 L22,70 Q18,70 18,66 L18,38 Q18,34 22,34 Z" />
+
+    <!-- Left device: screen inner area -->
+    <path
+        android:fillColor="#1A73E8"
+        android:pathData="M24,40 L34,40 L34,60 L24,60 Z" />
+
+    <!-- Right device: rounded rect phone shape -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M68,34 L82,34 Q86,34 86,38 L86,66 Q86,70 82,70 L68,70 Q64,70 64,66 L64,38 Q64,34 68,34 Z" />
+
+    <!-- Right device: screen inner area -->
+    <path
+        android:fillColor="#1A73E8"
+        android:pathData="M70,40 L80,40 L80,60 L70,60 Z" />
+
+    <!-- Connection beam center: glowing dot -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M50,52 A4,4 0 1,0 58,52 A4,4 0 1,0 50,52 Z" />
+
+    <!-- WiFi arc top -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:pathData="M44,46 Q54,36 64,46" />
+
+    <!-- WiFi arc middle -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:pathData="M46,50 Q54,42 62,50" />
+
+    <!-- File/doc overlay in center -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M49,57 L57,57 L57,67 L49,67 Z M55,57 L55,59 L57,59 L57,57" />
+
+    <!-- Folded corner on file -->
+    <path
+        android:fillColor="#90CAF9"
+        android:pathData="M55,57 L55,61 L57,59 L55,57 Z" />
+
+</vector>

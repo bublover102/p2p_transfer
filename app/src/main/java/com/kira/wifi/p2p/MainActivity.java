@@ -21,10 +21,10 @@ import android.net.wifi.p2p.WifiP2pManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.MediaStore;
-import android.support.design.widget.FloatingActionButton;
-import android.support.v4.app.ActivityCompat;
-import android.support.v4.content.ContextCompat;
-import android.support.v7.app.AppCompatActivity;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
+import com.google.android.material.floatingactionbutton.FloatingActionButton;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -40,22 +40,19 @@ import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
 
-import static android.content.Intent.CATEGORY_OPENABLE;
-
 public class MainActivity extends AppCompatActivity {
 
-    public final static String TCP_CLIENT_ACTION = "tcp.client.action";
-    public final static String EXTRA_IP_ADDR = "extra.ip.addr";
+    public static final String TCP_CLIENT_ACTION = "tcp.client.action";
+    public static final String EXTRA_IP_ADDR = "extra.ip.addr";
     private static final String TAG = "MainActivity";
-    protected static final int CHOOSE_FILE_RESULT_CODE = 20;
+    private static final int CHOOSE_FILE_RESULT_CODE = 20;
+    private static final int PERMISSION_REQUEST_CODE = 1;
+    private static final int TRANSFER_PORT = 8988;
 
     private WifiP2pManager mP2pManager;
     private WifiP2pManager.Channel mChannel;
@@ -90,21 +87,22 @@ public class MainActivity extends AppCompatActivity {
 
         checkPermission();
 
-        /* Open wifi first */
-        WifiManager wifiManager = (WifiManager) getSystemService(Context.WIFI_SERVICE);
-        if (!wifiManager.isWifiEnabled()) {
+        // Open WiFi if disabled
+        WifiManager wifiManager = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+        if (wifiManager != null && !wifiManager.isWifiEnabled()) {
             wifiManager.setWifiEnabled(true);
         }
 
+        // Check location service
         LocationManager locationManager = (LocationManager) getSystemService(LOCATION_SERVICE);
-        boolean ok = locationManager != null && locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER);
-        if (!ok) {
-            Toast.makeText(this, "Please turn on location service.", Toast.LENGTH_LONG).show();
-            Intent intent = new Intent();
-            intent.setAction(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS);
+        boolean locationOk = locationManager != null && locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER);
+        if (!locationOk) {
+            Toast.makeText(this, R.string.turn_on_location, Toast.LENGTH_LONG).show();
+            Intent intent = new Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS);
             startActivity(intent);
         }
 
+        // Init views
         mScanFab = findViewById(R.id.scan);
         mRoleText = findViewById(R.id.role);
         mGoAddrText = findViewById(R.id.go_addr);
@@ -126,6 +124,7 @@ public class MainActivity extends AppCompatActivity {
 
         resetDisplayUI();
 
+        // Group create/remove button
         mGoSwitchBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -137,13 +136,16 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
+        // Select Files button — opens file manager, sends immediately after selection
         mBrowseBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
                 intent.setType("image/*");
-                intent.setData(MediaStore.Images.Media.EXTERNAL_CONTENT_URI);
+                intent.putExtra(Intent.EXTRA_MIME_TYPES,
+                        new String[]{"image/*", "video/*", "application/*"});
                 intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+                intent.addCategory(Intent.CATEGORY_OPENABLE);
                 startActivityForResult(intent, CHOOSE_FILE_RESULT_CODE);
             }
         });
@@ -159,7 +161,6 @@ public class MainActivity extends AppCompatActivity {
                     mPeers.addAll(refreshedPeers);
                     updateP2pListView();
                 }
-
                 if (mPeers.size() == 0) {
                     Log.d(TAG, "No devices found");
                 }
@@ -173,17 +174,27 @@ public class MainActivity extends AppCompatActivity {
                 if (info.groupFormed && info.isGroupOwner) {
                     setDisplayUI("GO");
                     mGroupOwner = true;
-                } else if (info.groupFormed && !info.isGroupOwner){
+                } else if (info.groupFormed) {
                     mGroupOwner = false;
                     setDisplayUI("GC");
                 }
 
                 if (info.groupFormed) {
-                    startService(new Intent(MainActivity.this,
-                            WiFiDirectReceiveService.class));
-                    mGoAddrText.setText(getString(R.string.go_addr)
-                            + info.groupOwnerAddress.getHostAddress());
+                    Intent recvIntent = new Intent(MainActivity.this,
+                            WiFiDirectReceiveService.class);
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        startForegroundService(recvIntent);
+                    } else {
+                        startService(recvIntent);
+                    }
+                    if (info.groupOwnerAddress != null) {
+                        mGoAddrText.setText(getString(R.string.go_addr)
+                                + info.groupOwnerAddress.getHostAddress());
+                    }
                 } else {
+                    // Group dissolved — stop receive service
+                    stopService(new Intent(MainActivity.this,
+                            WiFiDirectReceiveService.class));
                     resetDisplayUI();
                 }
             }
@@ -192,13 +203,6 @@ public class MainActivity extends AppCompatActivity {
         mGroupInfoListener = new WifiP2pManager.GroupInfoListener() {
             @Override
             public void onGroupInfoAvailable(WifiP2pGroup group) {
-         //   mClientList.clear();
-         //   for (WifiP2pDevice p2pDevice : group.getClientList()) {
-         //       String connDevice = p2pDevice.deviceName + "\n" + p2pDevice.deviceAddress;
-         //       Log.e(TAG, "onGroupInfoAvailable: " + connDevice);
-         //       mClientList.add(connDevice);
-         //   }
-         //   updateClientListSpin();
                 mNetworkNameText.setText(getString(R.string.net_name) + group.getNetworkName());
             }
         };
@@ -206,19 +210,20 @@ public class MainActivity extends AppCompatActivity {
         mClientListSpin.setOnItemSelectedListener(new Spinner.OnItemSelectedListener() {
             @Override
             public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                mClientAddr = mClientList.get(position);
-                Log.e(TAG, "onItemSelected: address " + mClientAddr);
+                if (!mClientList.isEmpty()) {
+                    mClientAddr = mClientList.get(position);
+                    Log.d(TAG, "onItemSelected: address " + mClientAddr);
+                }
             }
 
             @Override
             public void onNothingSelected(AdapterView<?> parent) {
-
             }
         });
 
-        mAnimation =
-                new RotateAnimation(0, 359, RotateAnimation.RELATIVE_TO_SELF,
-                        0.5f, RotateAnimation.RELATIVE_TO_SELF, 0.5f);
+        // Scanning animation
+        mAnimation = new RotateAnimation(0, 359, RotateAnimation.RELATIVE_TO_SELF,
+                0.5f, RotateAnimation.RELATIVE_TO_SELF, 0.5f);
         mAnimation.setDuration(100);
         mAnimation.setRepeatCount(Animation.INFINITE);
         mAnimation.setRepeatMode(Animation.RESTART);
@@ -251,13 +256,14 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
+        // Receiver for TCP client notifications from ReceiveService
         mMainReceiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent intent) {
                 String action = intent.getAction();
                 if (TCP_CLIENT_ACTION.equals(action)) {
                     String address = intent.getStringExtra(EXTRA_IP_ADDR);
-                    if (!mClientList.contains(address)) {
+                    if (address != null && !mClientList.contains(address)) {
                         mClientList.add(address);
                         updateClientListSpin();
                     }
@@ -265,6 +271,7 @@ public class MainActivity extends AppCompatActivity {
             }
         };
 
+        // Register WiFi Direct broadcast receiver
         IntentFilter p2pFilter = new IntentFilter();
         p2pFilter.addAction(WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION);
         p2pFilter.addAction(WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION);
@@ -282,88 +289,68 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     public void onActivityResult(int requestCode, int resultCode, Intent data) {
+        if (resultCode != Activity.RESULT_OK || data == null) {
+            return;
+        }
+        if (requestCode != CHOOSE_FILE_RESULT_CODE) {
+            return;
+        }
+        if (mP2pInfo == null) {
+            Toast.makeText(this, R.string.not_connected, Toast.LENGTH_SHORT).show();
+            return;
+        }
 
-        // User has picked an image. Transfer it to group owner i.e peer using
-        // FileTransferService.
-        if (resultCode == Activity.RESULT_OK) {
-            switch (requestCode) {
-                case CHOOSE_FILE_RESULT_CODE:
-                    if (mP2pInfo == null || data == null) {
-                        Log.e(TAG, "onActivityResult: mP2pInfo or data null");
-                        return;
-                    }
-                    Uri uri = data.getData();
-                    if ((Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR2)
-                            && (null == uri)) {
-                        ClipData clipdata = data.getClipData();
-                        for (int i = 0; i < clipdata.getItemCount(); i++) {
-                            try {
-                                String uriStr, addrStr = "";
-                                if (!mGroupOwner) {
-                                    if (mP2pInfo.groupOwnerAddress != null) {
-                                        addrStr = mP2pInfo.groupOwnerAddress.getHostAddress();
-                                    }
-                                } else {
-                                    addrStr = mClientAddr;
-                                }
-
-                                if (addrStr == null || addrStr.isEmpty()) {
-                                    Log.e(TAG, "onActivityResult: addr empty");
-                                    return;
-                                }
-
-                                Log.e(TAG, "onActivityResult: address " + addrStr);
-
-                                uriStr = clipdata.getItemAt(i).getUri().toString();
-
-                                Intent serviceIntent = new Intent(this, WiFiDirectSendService.class);
-                                serviceIntent.setAction(WiFiDirectSendService.ACTION_SEND_FILE);
-                                serviceIntent.putExtra(WiFiDirectSendService.EXTRAS_FILE_PATH, uriStr);
-                                serviceIntent.putExtra(WiFiDirectSendService.EXTRAS_ADDRESS, addrStr);
-                                serviceIntent.putExtra(WiFiDirectSendService.EXTRAS_PORT, 8988);
-                                startService(serviceIntent);
-                                //DO something
-                            } catch (Exception e) {
-                                // TODO Auto-generated catch block
-                                e.printStackTrace();
-                            }
-                        }
-                    } else if (uri != null) {
-                        String uriStr, addrStr = "";
-                        if (!mGroupOwner) {
-                            if (mP2pInfo.groupOwnerAddress != null) {
-                                addrStr = mP2pInfo.groupOwnerAddress.getHostAddress();
-                            }
-                        } else {
-                            addrStr = mClientAddr;
-                        }
-
-                        if (addrStr == null || addrStr.isEmpty()) {
-                            Log.e(TAG, "onActivityResult: addr empty");
-                            return;
-                        }
-
-                        Log.e(TAG, "onActivityResult: address " + addrStr);
-
-                        uriStr = uri.toString();
-                        Log.d(TAG, "Intent----------- " + uriStr);
-
-                        Intent serviceIntent = new Intent(this, WiFiDirectSendService.class);
-                        serviceIntent.setAction(WiFiDirectSendService.ACTION_SEND_FILE);
-                        serviceIntent.putExtra(WiFiDirectSendService.EXTRAS_FILE_PATH, uriStr);
-                        serviceIntent.putExtra(WiFiDirectSendService.EXTRAS_ADDRESS, addrStr);
-                        serviceIntent.putExtra(WiFiDirectSendService.EXTRAS_PORT, 8988);
-                        startService(serviceIntent);
-                    }
-                    break;
-                default:
-                    break;
+        // Determine target address
+        String addrStr;
+        if (!mGroupOwner) {
+            if (mP2pInfo.groupOwnerAddress != null) {
+                addrStr = mP2pInfo.groupOwnerAddress.getHostAddress();
+            } else {
+                Toast.makeText(this, R.string.no_target_device, Toast.LENGTH_SHORT).show();
+                return;
             }
+        } else {
+            if (mClientAddr == null || mClientAddr.isEmpty()) {
+                Toast.makeText(this, R.string.no_target_device, Toast.LENGTH_SHORT).show();
+                return;
+            }
+            addrStr = mClientAddr;
+        }
+
+        Log.d(TAG, "onActivityResult: target " + addrStr);
+
+        // Collect selected file URIs and send immediately
+        Uri uri = data.getData();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR2 && uri == null) {
+            ClipData clipData = data.getClipData();
+            if (clipData != null) {
+                int count = clipData.getItemCount();
+                Toast.makeText(this, getString(R.string.sending_files, count), Toast.LENGTH_SHORT).show();
+                for (int i = 0; i < count; i++) {
+                    sendFile(addrStr, clipData.getItemAt(i).getUri().toString());
+                }
+            }
+        } else if (uri != null) {
+            Toast.makeText(this, R.string.sending_file, Toast.LENGTH_SHORT).show();
+            sendFile(addrStr, uri.toString());
+        }
+    }
+
+    private void sendFile(String addrStr, String uriStr) {
+        Intent serviceIntent = new Intent(this, WiFiDirectSendService.class);
+        serviceIntent.setAction(WiFiDirectSendService.ACTION_SEND_FILE);
+        serviceIntent.putExtra(WiFiDirectSendService.EXTRAS_FILE_PATH, uriStr);
+        serviceIntent.putExtra(WiFiDirectSendService.EXTRAS_ADDRESS, addrStr);
+        serviceIntent.putExtra(WiFiDirectSendService.EXTRAS_PORT, TRANSFER_PORT);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(serviceIntent);
+        } else {
+            startService(serviceIntent);
         }
     }
 
     private void checkPermission() {
-        ArrayList<String> permissionList = new ArrayList<String>();
+        ArrayList<String> permissionList = new ArrayList<>();
         permissionList.add(Manifest.permission.ACCESS_COARSE_LOCATION);
         permissionList.add(Manifest.permission.ACCESS_FINE_LOCATION);
         permissionList.add(Manifest.permission.ACCESS_WIFI_STATE);
@@ -373,91 +360,93 @@ public class MainActivity extends AppCompatActivity {
         Iterator<String> it = permissionList.iterator();
         while (it.hasNext()) {
             String permission = it.next();
-            Log.e(TAG, "checkPermission: " + permission);
             int hasPermission = ContextCompat.checkSelfPermission(this, permission);
             if (hasPermission == PackageManager.PERMISSION_GRANTED) {
                 it.remove();
             }
         }
-        if (permissionList.size() == 0) {
+        if (permissionList.isEmpty()) {
             return;
         }
         String[] permissions = permissionList.toArray(new String[0]);
-        ActivityCompat.requestPermissions(this, permissions, 1);
+        ActivityCompat.requestPermissions(this, permissions, PERMISSION_REQUEST_CODE);
     }
 
     @Override
-    public void onRequestPermissionsResult(int requestCode, String permissions[], int[] grantResults) {
-
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == PERMISSION_REQUEST_CODE) {
+            boolean allGranted = true;
+            for (int result : grantResults) {
+                if (result != PackageManager.PERMISSION_GRANTED) {
+                    allGranted = false;
+                    break;
+                }
+            }
+            if (!allGranted) {
+                Toast.makeText(this, R.string.permission_required, Toast.LENGTH_LONG).show();
+            }
+        }
     }
 
     @Override
-    public void onDestroy() {
+    protected void onDestroy() {
         super.onDestroy();
-        unregisterReceiver(mReceiver);
-        unregisterReceiver(mMainReceiver);
+        if (mReceiver != null) {
+            unregisterReceiver(mReceiver);
+        }
+        if (mMainReceiver != null) {
+            unregisterReceiver(mMainReceiver);
+        }
     }
 
-    @Override
-    public void onResume() {
-        super.onResume();
-    }
-
-    @Override
-    public void onPause() {
-        super.onPause();
-    }
+    // ---- Peer List Adapter ----
 
     private class WiFiPeerListAdapter extends BaseAdapter {
         private List<WifiP2pDevice> mPeerDevices;
         private LayoutInflater mInflater;
 
-        public WiFiPeerListAdapter(Context context,
-                                   List<WifiP2pDevice> peerDevices) {
+        WiFiPeerListAdapter(Context context, List<WifiP2pDevice> peerDevices) {
             mInflater = LayoutInflater.from(context);
             mPeerDevices = peerDevices;
         }
 
+        @Override
         public int getCount() {
             return mPeerDevices.size();
         }
 
+        @Override
         public Object getItem(int position) {
             return mPeerDevices.get(position);
         }
 
+        @Override
         public long getItemId(int position) {
             return position;
         }
 
+        @Override
         public View getView(int position, View convertView, ViewGroup parent) {
-            final ViewGroup vg;
-
+            ViewGroup vg;
             if (convertView != null) {
                 vg = (ViewGroup) convertView;
             } else {
-                vg = (ViewGroup) mInflater
-                        .inflate(R.layout.p2p_devices, null);
+                vg = (ViewGroup) mInflater.inflate(R.layout.p2p_devices, null);
             }
 
-            if (mPeerDevices.size() == 0)
+            if (mPeerDevices.isEmpty()) {
                 return vg;
+            }
 
             WifiP2pDevice device = mPeerDevices.get(position);
-
             ((TextView) vg.findViewById(R.id.device_name)).setText(device.deviceName);
             ((TextView) vg.findViewById(R.id.device_address)).setText(device.deviceAddress);
 
-            String statusStr = "UNAVAILABLE";
+            String statusStr;
             switch (device.status) {
-                case WifiP2pDevice.UNAVAILABLE:
-                    statusStr = "UNAVAILABLE";
-                    break;
                 case WifiP2pDevice.AVAILABLE:
                     statusStr = "AVAILABLE";
-                    break;
-                case WifiP2pDevice.FAILED:
-                    statusStr = "FAILED";
                     break;
                 case WifiP2pDevice.INVITED:
                     statusStr = "INVITED";
@@ -465,7 +454,12 @@ public class MainActivity extends AppCompatActivity {
                 case WifiP2pDevice.CONNECTED:
                     statusStr = "CONNECTED";
                     break;
+                case WifiP2pDevice.FAILED:
+                    statusStr = "FAILED";
+                    break;
+                case WifiP2pDevice.UNAVAILABLE:
                 default:
+                    statusStr = "UNAVAILABLE";
                     break;
             }
             ((TextView) vg.findViewById(R.id.device_status)).setText(statusStr);
@@ -473,17 +467,20 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    // ---- Group Management ----
+
     private void createGroup() {
         mP2pManager.createGroup(mChannel, new WifiP2pManager.ActionListener() {
             @Override
             public void onSuccess() {
-                Log.d(TAG, "createGroup onSuccess: ");
+                Log.d(TAG, "createGroup onSuccess");
                 setDisplayUI("GO");
             }
 
             @Override
             public void onFailure(int reason) {
                 Log.e(TAG, "createGroup onFailure: reason " + reason);
+                Toast.makeText(MainActivity.this, R.string.create_group_failed, Toast.LENGTH_SHORT).show();
             }
         });
     }
@@ -492,7 +489,9 @@ public class MainActivity extends AppCompatActivity {
         mP2pManager.removeGroup(mChannel, new WifiP2pManager.ActionListener() {
             @Override
             public void onSuccess() {
-                Log.d(TAG, "removeGroup onSuccess: ");
+                Log.d(TAG, "removeGroup onSuccess");
+                stopService(new Intent(MainActivity.this,
+                        WiFiDirectReceiveService.class));
                 resetDisplayUI();
             }
 
@@ -506,54 +505,87 @@ public class MainActivity extends AppCompatActivity {
     private void connect(WifiP2pDevice device) {
         WifiP2pConfig config = new WifiP2pConfig();
         config.deviceAddress = device.deviceAddress;
-
         stopDiscovery();
 
         mP2pManager.connect(mChannel, config, new WifiP2pManager.ActionListener() {
-
             @Override
             public void onSuccess() {
+                Log.d(TAG, "connect onSuccess");
             }
 
             @Override
             public void onFailure(int reason) {
-                Toast.makeText(getApplicationContext(), "Connect failed. Retry.",
-                        Toast.LENGTH_SHORT).show();
+                Toast.makeText(MainActivity.this, R.string.connect_failed, Toast.LENGTH_SHORT).show();
                 Log.e(TAG, "connect onFailure: reason " + reason);
             }
         });
     }
 
     private void cancelConnect(WifiP2pDevice device) {
-        WifiP2pConfig config = new WifiP2pConfig();
-        config.deviceAddress = device.deviceAddress;
-
         mP2pManager.cancelConnect(mChannel, new WifiP2pManager.ActionListener() {
-
             @Override
             public void onSuccess() {
+                Log.d(TAG, "cancelConnect onSuccess");
             }
 
             @Override
             public void onFailure(int reason) {
-                Toast.makeText(getApplicationContext(), "Cancel Connect failed, reason: " +
-                                reason,
+                Toast.makeText(MainActivity.this, getString(R.string.cancel_connect_failed) + reason,
                         Toast.LENGTH_SHORT).show();
                 Log.e(TAG, "cancelConnect onFailure: reason " + reason);
             }
         });
     }
 
-    public void setP2pEnabled(boolean enabled) {
+    // ---- Discovery ----
 
+    private void startDiscovery() {
+        mP2pManager.discoverPeers(mChannel, new WifiP2pManager.ActionListener() {
+            @Override
+            public void onSuccess() {
+                mScanState = true;
+                mScanFab.startAnimation(mAnimation);
+                Log.d(TAG, "discoverPeers onSuccess");
+            }
+
+            @Override
+            public void onFailure(int reason) {
+                Toast.makeText(MainActivity.this, getString(R.string.discover_failed) + reason,
+                        Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    private void stopDiscovery() {
+        mP2pManager.stopPeerDiscovery(mChannel, new WifiP2pManager.ActionListener() {
+            @Override
+            public void onSuccess() {
+                mScanState = false;
+                mScanFab.clearAnimation();
+                Log.d(TAG, "stopPeerDiscovery onSuccess");
+            }
+
+            @Override
+            public void onFailure(int reason) {
+                Log.e(TAG, "stopPeerDiscovery onFailure: " + reason);
+            }
+        });
+    }
+
+    // ---- UI Helpers ----
+
+    public void setP2pEnabled(boolean enabled) {
+        if (!enabled) {
+            Toast.makeText(this, R.string.p2p_disabled, Toast.LENGTH_SHORT).show();
+        }
     }
 
     @SuppressLint("RestrictedApi")
     private void resetDisplayUI() {
-        mGoSwitchBtn.setText(getString(R.string.go_create));
-        mRoleText.setText(getString(R.string.role));
-        mGoAddrText.setText(getString(R.string.go_addr));
-        mNetworkNameText.setText(getString(R.string.net_name));
+        mGoSwitchBtn.setText(R.string.go_create);
+        mRoleText.setText(R.string.role);
+        mGoAddrText.setText(R.string.go_addr);
+        mNetworkNameText.setText(R.string.net_name);
         mPeers.clear();
         mClientList.clear();
         updateClientListSpin();
@@ -564,11 +596,11 @@ public class MainActivity extends AppCompatActivity {
 
     @SuppressLint("RestrictedApi")
     private void setDisplayUI(String role) {
-        if (role.equalsIgnoreCase("GO")) {
-        mGoSwitchBtn.setText(getString(R.string.go_remove));
-        mRoleText.setText(getString(R.string.role) + getString(R.string.go));
-        } else if (role.equalsIgnoreCase("GC")) {
-            mGoSwitchBtn.setText(getString(R.string.go_create));
+        if ("GO".equalsIgnoreCase(role)) {
+            mGoSwitchBtn.setText(R.string.go_remove);
+            mRoleText.setText(getString(R.string.role) + getString(R.string.go));
+        } else if ("GC".equalsIgnoreCase(role)) {
+            mGoSwitchBtn.setText(R.string.go_create);
             mRoleText.setText(getString(R.string.role) + getString(R.string.gc));
         }
     }
@@ -585,65 +617,11 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void stopDiscovery() {
-        mP2pManager.stopPeerDiscovery(mChannel, new WifiP2pManager.ActionListener() {
-
-            @Override
-            public void onSuccess() {
-                mScanState = false;
-                mScanFab.clearAnimation();
-                Log.d(TAG, "stopPeerDiscovery onSuccess: ");
-            }
-
-            @Override
-            public void onFailure(int reason) {
-                Toast.makeText(getApplicationContext(), "discoverPeers fail "
-                        + reason, Toast.LENGTH_SHORT).show();
-            }
-        });
-    }
-
-    private void startDiscovery() {
-        mP2pManager.discoverPeers(mChannel, new WifiP2pManager.ActionListener() {
-
-            @Override
-            public void onSuccess() {
-                mScanState = true;
-                mScanFab.setAnimation(mAnimation);
-                mScanFab.startAnimation(mAnimation);
-                Log.d(TAG, "discoverPeers onSuccess: ");
-            }
-
-            @Override
-            public void onFailure(int reason) {
-                Toast.makeText(getApplicationContext(), "discoverPeers fail "
-                        + reason, Toast.LENGTH_SHORT).show();
-            }
-        });
-    }
-
     public void setDeviceName(String name) {
         mDevNameText.setText(getString(R.string.dev_name) + name);
     }
 
     public List<String> getClientList() {
         return mClientList;
-    }
-
-    public static boolean copyFile(InputStream inputStream, OutputStream out) {
-        byte buf[] = new byte[1024];
-        int len;
-        try {
-            while ((len = inputStream.read(buf)) != -1) {
-                out.write(buf, 0, len);
-
-            }
-            out.close();
-            inputStream.close();
-        } catch (IOException e) {
-            Log.d(TAG, e.toString());
-            return false;
-        }
-        return true;
     }
 }
